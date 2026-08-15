@@ -131,7 +131,8 @@ def cols_to_splat(cols: dict[str, list]) -> bytes:
             max(0, min(255, int(cb[i] * 255))),
             max(0, min(255, int(a * 255))),
         ]
-        q = [r0[i], r1[i], r2[i], r3[i]]
+        # INRIA / Brush store rot as wxyz. The viewer attribute is xyzw.
+        q = [r1[i], r2[i], r3[i], r0[i]]
         qn = math.sqrt(sum(v * v for v in q)) or 1.0
         q = [v / qn for v in q]
         qb = [max(0, min(255, int((v * 0.5 + 0.5) * 255))) for v in q]

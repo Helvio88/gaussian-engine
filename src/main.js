@@ -298,11 +298,12 @@ function exportSplat() {
 }
 
 function frameCloud(next) {
+  window.__lastBbox = next.bbox;
   const b = next.bbox;
   const cx = (b.min[0] + b.max[0]) * 0.5;
   const cy = (b.min[1] + b.max[1]) * 0.5;
   const cz = (b.min[2] + b.max[2]) * 0.5;
-  const radius = Math.max(0.6, Math.hypot(b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]) * 0.65);
+  const radius = Math.max(0.6, Math.hypot(b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]) * 0.18);
   Object.assign(cam, {
     target: [cx, cy, cz],
     yaw: 0.45,
@@ -539,7 +540,21 @@ $("btnHud").onclick = () => {
   document.body.classList.toggle("hud-min");
   $("btnHud").textContent = document.body.classList.contains("hud-min") ? "Expand" : "Compact";
 };
+window.__ge = { cam, setMode, frameCloud };
 showLan();
 showGpu();
 requestAnimationFrame(frame);
-loadRoom(defaultScene, mobile ? "Room 80k" : "Room 160k");
+const bootSplat = new URLSearchParams(location.search).get("splat");
+if (bootSplat) {
+  loadSplatUrl(bootSplat)
+    .then((next) => {
+      frameCloud(next);
+      return loadCloud(next, bootSplat);
+    })
+    .catch((err) => {
+      log.error(String(err));
+      loadRoom(defaultScene, mobile ? "Room 80k" : "Room 160k");
+    });
+} else {
+  loadRoom(defaultScene, mobile ? "Room 80k" : "Room 160k");
+}

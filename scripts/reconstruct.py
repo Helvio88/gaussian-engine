@@ -40,14 +40,31 @@ def which(name: str) -> str | None:
     return shutil.which(name)
 
 
-def run(cmd: list[str], cwd: Path | None, log_path: Path) -> None:
+def find_colmap() -> str | None:
+    env = os.environ.get("COLMAP")
+    if env and Path(env).exists():
+        return env
+    local = ROOT / "tools" / "colmap" / "bin" / "colmap.exe"
+    if local.exists():
+        return str(local)
+    return which("colmap")
+
+
+def run(cmd: list[str], cwd: Path | None, log_path: Path, env: dict | None = None) -> None:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("a", encoding="utf-8") as fh:
         fh.write("\n$ " + " ".join(cmd) + "\n")
         fh.flush()
-        proc = subprocess.run(cmd, cwd=cwd, stdout=fh, stderr=subprocess.STDOUT, check=False)
+        proc = subprocess.run(cmd, cwd=cwd, stdout=fh, stderr=subprocess.STDOUT, check=False, env=env)
     if proc.returncode != 0:
         raise RuntimeError(f"command failed ({proc.returncode}): {' '.join(cmd)}")
+
+
+def colmap_env(colmap_exe: str) -> dict:
+    env = os.environ.copy()
+    bindir = str(Path(colmap_exe).parent)
+    env["PATH"] = bindir + os.pathsep + env.get("PATH", "")
+    return env
 
 
 def gpu_venv_python() -> Path | None:
@@ -101,33 +118,58 @@ def probe() -> dict:
     return {
         "gpu": gpu,
         "ffmpeg": which("ffmpeg"),
-        "colmap": which("colmap"),
+        "colmap": find_colmap(),
         "gpu_python": str(py) if py else None,
         "torch": torch_ok,
         "cuda": cuda_ok,
-        "ready": bool(gpu and which("ffmpeg") and which("colmap") and torch_ok and cuda_ok),
+        "brush": find_brush(),
+        "ready": bool(
+            gpu
+            and which("ffmpeg")
+            and find_colmap()
+            and (find_brush() or (torch_ok and cuda_ok))
+        ),
     }
 
 
-def extract_frames(src: Path, frames: Path, fps: float = 2.0, width: int = 1280) -> int:
+def _edge_score(path: Path) -> float:
+    from PIL import Image, ImageFilter
+
+    im = Image.open(path).convert("L").resize((320, 180))
+    edges = im.filter(ImageFilter.FIND_EDGES)
+    hist = edges.histogram()
+    total = sum(hist) or 1
+    return sum(i * c for i, c in enumerate(hist)) / total
+
+
+def drop_blurry(frames: Path, keep_frac: float = 0.82) -> int:
+    files = sorted(frames.glob("*.jpg")) + sorted(frames.glob("*.png"))
+    if len(files) < 12:
+        return len(files)
+    scored = sorted(((_edge_score(p), p) for p in files), key=lambda x: x[0])
+    cut = max(8, int(len(scored) * keep_frac))
+    drop = scored[: len(scored) - cut]
+    for _, p in drop:
+        p.unlink(missing_ok=True)
+    return len(list(frames.glob("*.jpg"))) + len(list(frames.glob("*.png")))
+
+
+def extract_frames(src: Path, frames: Path, fps: float = 2.5, width: int = 1280) -> int:
     frames.mkdir(parents=True, exist_ok=True)
-    # Phone clips: 2 fps is a good overlap/speed tradeoff for a room walk.
-    vf = f"fps={fps},scale={width}:-2"
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-i",
-        str(src),
-        "-vf",
-        vf,
-        "-q:v",
-        "2",
-        str(frames / "%05d.jpg"),
-    ]
-    run(cmd, None, src.parent / "reconstruct.log")
-    n = len(list(frames.glob("*.jpg"))) + len(list(frames.glob("*.png")))
+    log = src.parent / "reconstruct.log"
+    # iPhone HDR/Dolby clips need a rec.709 bake or COLMAP sees washed-out mush.
+    hdr = (
+        f"fps={fps},scale={width}:-2,zscale=t=linear:npl=100,format=gbrpf32le,"
+        "zscale=p=bt709,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p"
+    )
+    sdr = f"fps={fps},scale={width}:-2"
+    try:
+        run(["ffmpeg", "-y", "-i", str(src), "-vf", hdr, "-q:v", "2", str(frames / "%05d.jpg")], None, log)
+    except RuntimeError:
+        run(["ffmpeg", "-y", "-i", str(src), "-vf", sdr, "-q:v", "2", str(frames / "%05d.jpg")], None, log)
+    n = drop_blurry(frames)
     if n < 8:
-        raise RuntimeError(f"only {n} frames extracted — record a longer, slower orbit (need ≥ 8)")
+        raise RuntimeError(f"only {n} usable frames — record a longer, slower orbit (need ≥ 8)")
     return n
 
 
@@ -145,12 +187,13 @@ def copy_images(images: list[Path], frames: Path) -> int:
 
 
 def run_colmap(job: Path, frames: Path) -> Path:
-    colmap = which("colmap")
+    colmap = find_colmap()
     if not colmap:
         raise RuntimeError(
             "COLMAP is not on PATH. Install the CUDA Windows build from "
             "https://github.com/colmap/colmap/releases and re-run."
         )
+    env = colmap_env(colmap)
     db = job / "colmap" / "database.db"
     sparse = job / "colmap" / "sparse"
     db.parent.mkdir(parents=True, exist_ok=True)
@@ -168,23 +211,32 @@ def run_colmap(job: Path, frames: Path) -> Path:
             "1",
             "--ImageReader.camera_model",
             "OPENCV",
-            "--SiftExtraction.use_gpu",
+            "--FeatureExtraction.use_gpu",
             "1",
+            "--FeatureExtraction.max_image_size",
+            "1600",
         ],
         job,
         log,
+        env,
     )
+    # Walk-through video: match neighbors (+ quadratic hops), not every pair.
     run(
         [
             colmap,
-            "exhaustive_matcher",
+            "sequential_matcher",
             "--database_path",
             str(db),
-            "--SiftMatching.use_gpu",
+            "--FeatureMatching.use_gpu",
+            "1",
+            "--SequentialMatching.overlap",
+            "18",
+            "--SequentialMatching.quadratic_overlap",
             "1",
         ],
         job,
         log,
+        env,
     )
     run(
         [
@@ -199,12 +251,17 @@ def run_colmap(job: Path, frames: Path) -> Path:
         ],
         job,
         log,
+        env,
     )
     models = [p for p in sparse.iterdir() if p.is_dir()]
     if not models:
         raise RuntimeError("COLMAP produced no reconstruction — more overlap / slower motion needed")
-    # Use the largest model.
-    models.sort(key=lambda p: sum(1 for _ in p.glob("*")), reverse=True)
+    # Prefer the model with the most registered images (images.bin size).
+    def model_bytes(p: Path) -> int:
+        f = p / "images.bin"
+        return f.stat().st_size if f.exists() else 0
+
+    models.sort(key=model_bytes, reverse=True)
     model = models[0]
     run(
         [
@@ -219,8 +276,63 @@ def run_colmap(job: Path, frames: Path) -> Path:
         ],
         job,
         log,
+        env,
     )
     return model
+
+
+def find_brush() -> str | None:
+    local = ROOT / "tools" / "brush" / "brush_app.exe"
+    if local.exists():
+        return str(local)
+    return which("brush_app")
+
+
+def run_brush(job: Path, frames: Path, sparse: Path) -> Path:
+    brush = find_brush()
+    if not brush:
+        raise RuntimeError("Brush trainer not found")
+    data = job / "gsplat_data"
+    img_link = data / "images"
+    spr_link = data / "sparse" / "0"
+    if data.exists():
+        shutil.rmtree(data)
+    spr_link.parent.mkdir(parents=True)
+    shutil.copytree(frames, img_link)
+    shutil.copytree(sparse, spr_link)
+    out = job / "brush_out"
+    out.mkdir(parents=True, exist_ok=True)
+    steps = os.environ.get("GSPLAT_STEPS", "12000")
+    run(
+        [
+            brush,
+            str(data),
+            "--total-steps",
+            steps,
+            "--export-every",
+            steps,
+            "--export-path",
+            str(out),
+            "--export-name",
+            "export",
+            "--max-resolution",
+            "1280",
+            "--max-splats",
+            "600000",
+        ],
+        job,
+        job / "reconstruct.log",
+    )
+    # Brush writes the export name with no extension.
+    candidates = list(out.glob("export*")) + list(out.glob("*.ply"))
+    if not candidates:
+        raise RuntimeError("Brush finished but wrote no ply")
+    ply = max(candidates, key=lambda p: p.stat().st_mtime)
+    if ply.suffix.lower() != ".ply":
+        named = ply.with_suffix(".ply")
+        shutil.copy2(ply, named)
+        ply = named
+    return ply
 
 
 def run_gsplat(job: Path, frames: Path, sparse: Path) -> Path:
@@ -290,7 +402,10 @@ def reconstruct(job: Path) -> Path:
     sparse = run_colmap(job, frames)
     write_status(job, stage="train", colmap=str(sparse), progress=0.45)
 
-    ply = run_gsplat(job, frames, sparse)
+    if find_brush():
+        ply = run_brush(job, frames, sparse)
+    else:
+        ply = run_gsplat(job, frames, sparse)
     write_status(job, stage="export", ply=str(ply), progress=0.9)
 
     splat = job / "result.splat"
