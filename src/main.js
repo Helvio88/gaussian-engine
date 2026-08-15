@@ -3,7 +3,7 @@ import { lookAt, perspective, isMobile, tick, fmtCount } from "./math.js";
 import { buildOctree, selectLod } from "./octree.js";
 import { Renderer } from "./renderer.js";
 import { generateRoom, resetCamera, ROOM_BOUNDS } from "./scene.js";
-import { decodeSplat, encodeSplat } from "./format.js";
+import { decodeSplat, encodeSplat, loadSplatUrl } from "./format.js";
 
 const FOV = 55;
 const mobile = isMobile();
@@ -297,15 +297,96 @@ function exportSplat() {
   log.info(`exported ${cloud.count} splats`);
 }
 
+function frameCloud(next) {
+  const b = next.bbox;
+  const cx = (b.min[0] + b.max[0]) * 0.5;
+  const cy = (b.min[1] + b.max[1]) * 0.5;
+  const cz = (b.min[2] + b.max[2]) * 0.5;
+  const radius = Math.max(0.6, Math.hypot(b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]) * 0.65);
+  Object.assign(cam, {
+    target: [cx, cy, cz],
+    yaw: 0.45,
+    pitch: 0.18,
+    radius,
+    mode: "orbit",
+  });
+  setMode("orbit");
+}
+
 async function importSplat(file) {
   try {
+    const name = file.name.toLowerCase();
+    if (name.endsWith(".mp4") || name.endsWith(".mov") || name.endsWith(".webm") || name.endsWith(".mkv") || file.type.startsWith("video/") || file.type.startsWith("image/")) {
+      await uploadAndReconstruct(file);
+      return;
+    }
     setStatus(`Reading ${file.name}…`);
     const buf = await file.arrayBuffer();
     const next = decodeSplat(buf);
+    frameCloud(next);
     await loadCloud(next, file.name);
   } catch (err) {
     setStatus(String(err.message || err));
     log.error(String(err.message || err));
+  }
+}
+
+async function uploadAndReconstruct(file) {
+  setStatus(`Uploading ${file.name}…`);
+  log.info(`upload ${file.name} ${(file.size / 1e6).toFixed(1)}MB`);
+  const job = await new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/jobs");
+    xhr.responseType = "json";
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) setStatus(`Upload ${((100 * e.loaded) / e.total).toFixed(0)}% · ${file.name}`);
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) resolve(xhr.response);
+      else reject(new Error((xhr.response && xhr.response.error) || `upload ${xhr.status}`));
+    };
+    xhr.onerror = () => reject(new Error("upload failed"));
+    const fd = new FormData();
+    fd.append("file", file, file.name);
+    xhr.send(fd);
+  });
+  if (job.error) throw new Error(job.error);
+  log.info(`job ${job.id} queued`);
+  await pollJob(job.id);
+}
+
+async function pollJob(id) {
+  for (;;) {
+    const info = await (await fetch(`/api/jobs/${id}`)).json();
+    const pct = Math.round((info.progress || 0) * 100);
+    const stage = info.stage || info.state || "…";
+    if (info.state === "error") throw new Error(info.error || "reconstruct failed");
+    if (info.state === "done" && info.splat_url) {
+      setStatus(`Loading splat · ${fmtCount(info.count || 0)}…`);
+      const next = await loadSplatUrl(info.splat_url);
+      frameCloud(next);
+      await loadCloud(next, `job ${id}`);
+      return;
+    }
+    setStatus(`GPU ${stage} ${pct}%`);
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+}
+
+async function showGpu() {
+  try {
+    const g = await (await fetch("/api/gpu")).json();
+    const el = $("gpu");
+    if (!el) return;
+    if (g.gpu && g.gpu.name) {
+      const ready = g.ready ? "ready" : "needs setup";
+      el.textContent = `${g.gpu.name} · ${g.gpu.vram_mb}MB · train ${ready}`;
+      log.info(`gpu ${g.gpu.name} cuda=${g.cuda} colmap=${!!g.colmap} torch=${g.torch}`);
+    } else {
+      el.textContent = "No NVIDIA GPU visible to the server";
+    }
+  } catch (err) {
+    log.warn("gpu status " + err);
   }
 }
 
@@ -353,10 +434,13 @@ function frame(now) {
   last = now;
   frames++;
   if (now - fpsT > 500) {
-    fps = (frames * 1000) / (now - fpsT);
+    const elapsed = now - fpsT;
+    fps = (frames * 1000) / elapsed;
+    const samples = frames;
     frames = 0;
     fpsT = now;
-    adaptBudget();
+    // Skip adapt on a stale rAF wake (tab was hidden) or a tiny sample.
+    if (!document.hidden && elapsed < 1200 && samples >= 8) adaptBudget();
   }
   if (cam.mode === "orbit") applyOrbit();
   else applyWalk(dt);
@@ -378,6 +462,16 @@ $("btnOrbit").onclick = () => setMode("orbit");
 $("btnWalk").onclick = () => setMode("walk");
 $("btnExport").onclick = exportSplat;
 $("fileSplat").onchange = (e) => {
+  const f = e.target.files?.[0];
+  if (f) importSplat(f);
+  e.target.value = "";
+};
+$("fileCapture").onchange = (e) => {
+  const f = e.target.files?.[0];
+  if (f) importSplat(f);
+  e.target.value = "";
+};
+$("fileVideo").onchange = (e) => {
   const f = e.target.files?.[0];
   if (f) importSplat(f);
   e.target.value = "";
@@ -446,5 +540,6 @@ $("btnHud").onclick = () => {
   $("btnHud").textContent = document.body.classList.contains("hud-min") ? "Expand" : "Compact";
 };
 showLan();
+showGpu();
 requestAnimationFrame(frame);
 loadRoom(defaultScene, mobile ? "Room 80k" : "Room 160k");

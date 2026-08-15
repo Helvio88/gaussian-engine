@@ -65,7 +65,9 @@ input[type=range]{width:110px;accent-color:var(--accent)}
       <button id="btnRoom3m">Room 3.5M</button>
       <button id="btnOrbit" class="active">Orbit</button>
       <button id="btnWalk">Walk</button>
-      <label class="btn">Load .splat<input id="fileSplat" type="file" accept=".splat,application/octet-stream"/></label>
+      <label class="btn">Load .splat<input id="fileSplat" type="file" accept=".splat,.ply,application/octet-stream"/></label>
+      <label class="btn">Capture<input id="fileCapture" type="file" accept="video/*,image/*" capture="environment"/></label>
+      <label class="btn">Upload clip<input id="fileVideo" type="file" accept="video/*,.mp4,.mov,.webm,.mkv,image/*"/></label>
       <button id="btnExport">Export</button>
     </div>
     <div class="row" id="hudExtra">
@@ -84,6 +86,7 @@ input[type=range]{width:110px;accent-color:var(--accent)}
       <div>
         <div id="status">Starting…</div>
         <div id="stats"></div>
+        <div id="gpu" class="muted"></div>
         <div id="lan" hidden title="Click to copy"></div>
       </div>
       <button id="btnHud">Compact</button>
