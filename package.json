@@ -1,0 +1,12 @@
+{
+  "name": "gaussian-engine",
+  "private": true,
+  "version": "0.2.0",
+  "description": "High-capacity 3D Gaussian Splatting viewer for the web.",
+  "type": "module",
+  "scripts": {
+    "start": "py -3 serve.py --port 8080",
+    "test": "node scripts/test-lod.mjs",
+    "verify": "node scripts/verify.mjs"
+  }
+}
