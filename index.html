@@ -1,84 +1,56 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Gaussian Engine · tens of millions</title>
-    <style>
-      :root {
-        --bg: #0a0a0b;
-        --panel: #141416;
-        --line: rgba(255, 255, 255, 0.1);
-        --fg: #f0f0f2;
-        --muted: #9a9aa3;
-        --accent: #e8e4dc;
-        --accent-fg: #121214;
-      }
-      * { box-sizing: border-box; }
-      html, body {
-        margin: 0; height: 100%;
-        background: var(--bg); color: var(--fg);
-        font: 14px/1.45 system-ui, -apple-system, sans-serif;
-      }
-      #c { display: block; width: 100%; height: 100%; touch-action: none; }
-      .hud {
-        position: fixed; inset: 0; pointer-events: none;
-        display: flex; flex-direction: column; justify-content: space-between; padding: 16px;
-      }
-      .top, .bottom { pointer-events: auto; max-width: 960px; }
-      .panel {
-        background: color-mix(in oklab, var(--panel) 92%, transparent);
-        border: 1px solid var(--line); border-radius: 12px;
-        padding: 12px 14px; backdrop-filter: blur(8px);
-      }
-      h1 { margin: 0 0 4px; font-size: 15px; font-weight: 600; letter-spacing: -0.02em; }
-      .muted { color: var(--muted); font-size: 12px; }
-      .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }
-      button, label.btn {
-        appearance: none; border: 1px solid var(--line); background: var(--panel);
-        color: var(--fg); border-radius: 8px; padding: 8px 12px; font: inherit; cursor: pointer;
-      }
-      button:hover, label.btn:hover { border-color: rgba(255, 255, 255, 0.25); }
-      button.active { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
-      input[type="file"] { display: none; }
-      input[type="range"] { width: 140px; accent-color: var(--accent); }
-      #status, #stats { font-variant-numeric: tabular-nums; }
-      #stats { margin-top: 6px; font-size: 12px; color: var(--muted); }
-    </style>
-  </head>
-  <body>
-    <canvas id="c"></canvas>
-    <div class="hud">
-      <div class="top panel">
-        <h1>Gaussian Engine</h1>
-        <div class="muted">
-          Hierarchical LoD · fixed draw budget · WebGL2 covariance projection · designed for tens of millions in-scene
-        </div>
-        <div class="row">
-          <button id="btnRoom500k">Room 0.5M</button>
-          <button id="btnRoom2m">Room 2M</button>
-          <button id="btnRoom5m">Room 5M</button>
-          <button id="btnCampus">Campus ~12M</button>
-          <label class="btn">Load .splat<input id="file" type="file" accept=".splat,.ply" /></label>
-          <button id="btnExport">Export .splat</button>
-        </div>
-        <div class="row">
-          <button id="btnOrbit" class="active">Orbit</button>
-          <button id="btnWalk">Walk</button>
-          <span class="muted">Budget</span>
-          <input id="budget" type="range" min="100000" max="3000000" step="50000" />
-          <span id="budgetLabel" class="muted">1.0M</span>
-          <span class="muted">Scale</span>
-          <input id="scale" type="range" min="0.4" max="2.5" step="0.05" value="1" />
-          <span id="scaleLabel" class="muted">1.00</span>
-        </div>
-        <div id="status">Starting…</div>
-        <div id="stats"></div>
-      </div>
-      <div class="bottom muted">
-        Drag to look · scroll to zoom · Walk: WASD · Space/C up-down · only the budget is sorted & drawn each frame
-      </div>
-    </div>
-    <script type="module" src="./src/main.js"></script>
-  </body>
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Gaussian Engine</title>
+<style>
+:root{--bg:#0a0a0b;--panel:#141416;--line:rgba(255,255,255,.1);--fg:#f0f0f2;--muted:#9a9aa3;--accent:#e8e4dc;--accent-fg:#121214}
+*{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,-apple-system,sans-serif}
+#c{display:block;width:100%;height:100%;touch-action:none}
+.hud{position:fixed;inset:0;pointer-events:none;display:flex;flex-direction:column;justify-content:space-between;padding:16px}
+.top,.bottom{pointer-events:auto;max-width:960px}
+.panel{background:rgba(20,20,22,.92);border:1px solid var(--line);border-radius:12px;padding:12px 14px;backdrop-filter:blur(8px)}
+h1{margin:0 0 4px;font-size:15px;font-weight:600}.muted{color:var(--muted);font-size:12px}
+.row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;align-items:center}
+button,label.btn{appearance:none;border:1px solid var(--line);background:var(--panel);color:var(--fg);border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer}
+button:hover,label.btn:hover{border-color:rgba(255,255,255,.25)}
+button.active{background:var(--accent);color:var(--accent-fg);border-color:transparent}
+input[type=file]{display:none}input[type=range]{width:140px;accent-color:var(--accent)}
+#stats{margin-top:6px;font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="hud">
+<div class="top panel">
+<h1>Gaussian Engine</h1>
+<div class="muted">Hierarchical LoD · fixed draw budget · WebGL2 covariance · multi-million capacity</div>
+<div class="row">
+<button id="btnRoom500k">Room 0.5M</button>
+<button id="btnRoom2m">Room 2M</button>
+<button id="btnRoom5m">Room 5M</button>
+<button id="btnCampus">Campus ~10M</button>
+<label class="btn">Load .splat<input id="file" type="file" accept=".splat"/></label>
+<button id="btnExport">Export .splat</button>
+</div>
+<div class="row">
+<button id="btnOrbit" class="active">Orbit</button>
+<button id="btnWalk">Walk</button>
+<span class="muted">Budget</span>
+<input id="budget" type="range" min="100000" max="3000000" step="50000"/>
+<span id="budgetLabel" class="muted">1.0M</span>
+<span class="muted">Scale</span>
+<input id="scale" type="range" min="0.4" max="2.5" step="0.05" value="1"/>
+<span id="scaleLabel" class="muted">1.00</span>
+</div>
+<div id="status">Starting…</div>
+<div id="stats"></div>
+</div>
+<div class="bottom muted">Drag to look · scroll to zoom · Walk: WASD · Space/C · budget-only sort & draw</div>
+</div>
+<script src="engine-1.js"></script>
+<script src="engine-2.js"></script>
+<script src="engine-3.js"></script>
+</body>
 </html>
